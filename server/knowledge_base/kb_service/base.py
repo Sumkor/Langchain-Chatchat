@@ -111,9 +111,8 @@ class KBService(ABC):
         """
         if docs:
             custom_docs = True
-            for doc in docs:
-                doc.metadata.setdefault("source", kb_file.filename)
         else:
+            # 获取切分后的文档
             docs = kb_file.file2text()
             custom_docs = False
 
@@ -121,6 +120,7 @@ class KBService(ABC):
             # 将 metadata["source"] 改为相对路径
             for doc in docs:
                 try:
+                    doc.metadata.setdefault("source", kb_file.filename)
                     source = doc.metadata.get("source", "")
                     if os.path.isabs(source):
                         rel_path = Path(source).relative_to(self.doc_path)
@@ -128,7 +128,9 @@ class KBService(ABC):
                 except Exception as e:
                     print(f"cannot convert absolute path ({source}) to relative path. error is : {e}")
             self.delete_doc(kb_file)
+            # 更新向量数据库
             doc_infos = self.do_add_doc(docs, **kwargs)
+            # 更新 sqlite 数据库
             status = add_file_to_db(kb_file,
                                     custom_docs=custom_docs,
                                     docs_count=len(docs),

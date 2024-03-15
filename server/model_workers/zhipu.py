@@ -70,10 +70,11 @@ class ChatGLMWorker(ApiModelWorker):
 
         url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         with httpx.Client(headers=headers) as client:
+            print(f'request=============={data}')
             response = client.post(url, json=data)
             response.raise_for_status()
             chunk = response.json()
-            print(chunk)
+            print(f'response============={chunk}')
             yield {"error_code": 0, "text": chunk["choices"][0]["message"]["content"]}
 
             # with connect_sse(client, "POST", url, json=data) as event_source:

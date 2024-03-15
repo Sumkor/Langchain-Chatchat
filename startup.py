@@ -452,6 +452,7 @@ def run_webui(started_event: mp.Event = None, run_mode: str = None):
     port = WEBUI_SERVER["port"]
 
     cmd = ["streamlit", "run", "webui.py",
+    # cmd = ["E:\ENV\chatchat\Scripts\streamlit.exe", "run", "webui.py",
            "--server.address", host,
            "--server.port", str(port),
            "--theme.base", "light",
@@ -464,6 +465,7 @@ def run_webui(started_event: mp.Event = None, run_mode: str = None):
             "--",
             "lite",
         ]
+    print("准备执行%s" % cmd)
     p = subprocess.Popen(cmd)
     started_event.set()
     p.wait()
@@ -746,6 +748,7 @@ async def start_main_server():
     else:
         try:
             # 保证任务收到SIGINT后，能够正常退出
+            # 海象运算符，如果获取到的值非空且为真（非零数值、非空字符串、列表、字典等大多数非零对象），则 if 语句体将被执行。
             if p := processes.get("controller"):
                 p.start()
                 p.name = f"{p.name} ({p.pid})"
@@ -868,16 +871,20 @@ async def start_main_server():
 
 if __name__ == "__main__":
     create_tables()
+    # sys.version_info 返回版本信息元组，分别表示主版本号、次版本号、微版本号、发布级别和序列号。
     if sys.version_info < (3, 10):
         loop = asyncio.get_event_loop()
     else:
         try:
+            # 获取当前运行中的事件循环实例，存储到变量 loop 中。
+            # 事件循环是异步编程 asyncio 的核心组件，它负责调度协程的执行、处理I/O以及计时器等异步任务。
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
 
         asyncio.set_event_loop(loop)
 
+    # 指示事件循环执行 start_main_server() 这个协程，直到服务器完全启动并且处于可以接收连接和处理请求的状态。
     loop.run_until_complete(start_main_server())
 
 # 服务启动后接口调用示例：

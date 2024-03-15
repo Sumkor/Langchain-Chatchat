@@ -1,4 +1,6 @@
 import os
+
+from langchain_community.document_loaders import TextLoader
 from configs import (
     KB_ROOT_PATH,
     CHUNK_SIZE,
@@ -9,16 +11,17 @@ from configs import (
     text_splitter_dict,
     LLM_MODELS,
     TEXT_SPLITTER_NAME,
+    LOADER_DICT,
 )
 import importlib
-from text_splitter import zh_title_enhance as func_zh_title_enhance
+from text_splitter import zh_title_enhance as func_zh_title_enhance, ChineseRecursiveTextSplitter
 import langchain.document_loaders
 from langchain.docstore.document import Document
 from langchain.text_splitter import TextSplitter
 from pathlib import Path
 from server.utils import run_in_thread_pool, get_model_worker_config
 import json
-from typing import List, Union,Dict, Tuple, Generator
+from typing import List, Union, Dict, Tuple, Generator
 import chardet
 
 
@@ -71,7 +74,7 @@ def list_files_from_folder(kb_name: str):
                 for target_entry in target_it:
                     process_entry(target_entry)
         elif entry.is_file():
-            file_path = (Path(os.path.relpath(entry.path, doc_path)).as_posix()) # 路径统一为 posix 格式
+            file_path = (Path(os.path.relpath(entry.path, doc_path)).as_posix())  # 路径统一为 posix 格式
             result.append(file_path)
         elif entry.is_dir():
             with os.scandir(entry.path) as it:
@@ -85,36 +88,6 @@ def list_files_from_folder(kb_name: str):
     return result
 
 
-LOADER_DICT = {"UnstructuredHTMLLoader": ['.html', '.htm'],
-               "MHTMLLoader": ['.mhtml'],
-               "UnstructuredMarkdownLoader": ['.md'],
-               "JSONLoader": [".json"],
-               "JSONLinesLoader": [".jsonl"],
-               "CSVLoader": [".csv"],
-               # "FilteredCSVLoader": [".csv"], 如果使用自定义分割csv
-               "RapidOCRPDFLoader": [".pdf"],
-               "RapidOCRDocLoader": ['.docx', '.doc'],
-               "RapidOCRPPTLoader": ['.ppt', '.pptx', ],
-               "RapidOCRLoader": ['.png', '.jpg', '.jpeg', '.bmp'],
-               "UnstructuredFileLoader": ['.eml', '.msg', '.rst',
-                                          '.rtf', '.txt', '.xml',
-                                          '.epub', '.odt','.tsv'],
-               "UnstructuredEmailLoader": ['.eml', '.msg'],
-               "UnstructuredEPubLoader": ['.epub'],
-               "UnstructuredExcelLoader": ['.xlsx', '.xls', '.xlsd'],
-               "NotebookLoader": ['.ipynb'],
-               "UnstructuredODTLoader": ['.odt'],
-               "PythonLoader": ['.py'],
-               "UnstructuredRSTLoader": ['.rst'],
-               "UnstructuredRTFLoader": ['.rtf'],
-               "SRTLoader": ['.srt'],
-               "TomlLoader": ['.toml'],
-               "UnstructuredTSVLoader": ['.tsv'],
-               "UnstructuredWordDocumentLoader": ['.docx', '.doc'],
-               "UnstructuredXMLLoader": ['.xml'],
-               "UnstructuredPowerPointLoader": ['.ppt', '.pptx'],
-               "EverNoteLoader": ['.enex'],
-               }
 SUPPORTED_EXTS = [ext for sublist in LOADER_DICT.values() for ext in sublist]
 
 
@@ -145,14 +118,16 @@ def get_LoaderClass(file_extension):
         if file_extension in extensions:
             return LoaderClass
 
+
 def get_loader(loader_name: str, file_path: str, loader_kwargs: Dict = None):
     '''
     根据loader_name和文件路径或内容返回文档加载器。
     '''
     loader_kwargs = loader_kwargs or {}
     try:
+        # 自定义的 loader
         if loader_name in ["RapidOCRPDFLoader", "RapidOCRLoader", "FilteredCSVLoader",
-                           "RapidOCRDocLoader", "RapidOCRPPTLoader"]:
+                           "RapidOCRDocLoader", "RapidOCRPPTLoader", "Doc2MarkdownLoader"]:
             document_loaders_module = importlib.import_module('document_loaders')
         else:
             document_loaders_module = importlib.import_module('langchain.document_loaders')
@@ -261,7 +236,7 @@ def make_text_splitter(
         text_splitter_module = importlib.import_module('langchain.text_splitter')
         TextSplitter = getattr(text_splitter_module, "RecursiveCharacterTextSplitter")
         text_splitter = TextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        
+
     # If you use SpacyTextSplitter you can use GPU to do split likes Issue #1287
     # text_splitter._tokenizer.max_length = 37016792
     # text_splitter._tokenizer.prefer_gpu()
@@ -291,12 +266,20 @@ class KnowledgeFile:
         self.text_splitter_name = TEXT_SPLITTER_NAME
 
     def file2docs(self, refresh: bool = False):
+        """
+        加载文档
+        """
         if self.docs is None or refresh:
             logger.info(f"{self.document_loader_name} used for {self.filepath}")
             loader = get_loader(loader_name=self.document_loader_name,
                                 file_path=self.filepath,
                                 loader_kwargs=self.loader_kwargs)
-            self.docs = loader.load()
+            if isinstance(loader, TextLoader):
+                loader.encoding = "utf8"
+                self.docs = loader.load()
+            else:
+                self.docs = loader.load()
+            # self.docs = loader.load()
         return self.docs
 
     def docs2texts(
@@ -308,6 +291,9 @@ class KnowledgeFile:
             chunk_overlap: int = OVERLAP_SIZE,
             text_splitter: TextSplitter = None,
     ):
+        """
+        切分文档
+        """
         docs = docs or self.file2docs(refresh=refresh)
         if not docs:
             return []
@@ -317,6 +303,16 @@ class KnowledgeFile:
                                                    chunk_overlap=chunk_overlap)
             if self.text_splitter_name == "MarkdownHeaderTextSplitter":
                 docs = text_splitter.split_text(docs[0].page_content)
+                # 对于markdown格式，再按文本长度切分一下
+                text_splitter = ChineseRecursiveTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+                docs = text_splitter.split_documents(docs)
+                # markdown标题恢复，适用于 MarkdownHeaderTextSplitter 参数 strip_headers=True 的情况
+                headers_to_split_on = text_splitter_dict['MarkdownHeaderTextSplitter']['headers_to_split_on']
+                for doc in docs:
+                    for header in reversed(headers_to_split_on):
+                        if doc.metadata.get(header[1]):
+                            doc.page_content = header[0] + doc.metadata.get(header[1]) + " " + doc.page_content
+
             else:
                 docs = text_splitter.split_documents(docs)
 
@@ -367,6 +363,7 @@ def files2docs_in_thread(
     利用多线程批量将磁盘文件转化成langchain Document.
     如果传入参数是Tuple，形式为(filename, kb_name)
     生成器返回值为 status, (kb_name, file_name, docs | error)
+    这个函数包含 yield 关键字，是生成器（Generator）函数
     '''
 
     def file2docs(*, file: KnowledgeFile, **kwargs) -> Tuple[bool, Tuple[str, str, List[Document]]]:
@@ -378,6 +375,7 @@ def files2docs_in_thread(
                          exc_info=e if log_verbose else None)
             return False, (file.kb_name, file.filename, msg)
 
+    # 组装文件相关参数
     kwargs_list = []
     for i, file in enumerate(files):
         kwargs = {}
@@ -399,6 +397,7 @@ def files2docs_in_thread(
         except Exception as e:
             yield False, (kb_name, filename, str(e))
 
+    # 在子线程中执行 func 函数，params 作为函数入参
     for result in run_in_thread_pool(func=file2docs, params=kwargs_list):
         yield result
 
@@ -411,4 +410,7 @@ if __name__ == "__main__":
         knowledge_base_name="samples")
     # kb_file.text_splitter_name = "RecursiveCharacterTextSplitter"
     docs = kb_file.file2docs()
-    # pprint(docs[-1])
+    texts = kb_file.docs2texts(docs, zh_title_enhance=True)
+    for text in texts:
+        print(text)
+
