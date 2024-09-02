@@ -74,3 +74,10 @@ zhipuai==1.0.7
 
 markdownify
 mammoth
+spire.pdf
+# PyMuPDF
+# tqdm
+pyperclip
+oss2
+html2text
+

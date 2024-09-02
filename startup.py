@@ -451,8 +451,8 @@ def run_webui(started_event: mp.Event = None, run_mode: str = None):
     host = WEBUI_SERVER["host"]
     port = WEBUI_SERVER["port"]
 
-    cmd = ["streamlit", "run", "webui.py",
-    # cmd = ["E:\ENV\chatchat\Scripts\streamlit.exe", "run", "webui.py",
+    # cmd = ["streamlit", "run", "webui.py",
+    cmd = ["E:\ENV\chatchat\Scripts\streamlit.exe", "run", "webui.py",
            "--server.address", host,
            "--server.port", str(port),
            "--theme.base", "light",

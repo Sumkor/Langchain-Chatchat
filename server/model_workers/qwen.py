@@ -36,6 +36,7 @@ class QwenWorker(ApiModelWorker):
             logger.info(f'{self.__class__.__name__}:params: {params}')
 
         gen = dashscope.Generation()
+        # 函数的返回值可能是单个的 GenerationResponse 实例，也可能是能够逐次生成多个 GenerationResponse 实例的生成器对象。
         responses = gen.call(
             model=params.version,
             temperature=params.temperature,
@@ -48,6 +49,7 @@ class QwenWorker(ApiModelWorker):
         for resp in responses:
             if resp["status_code"] == 200:
                 if choices := resp["output"]["choices"]:
+                    # 说明返回的是一个迭代器对象
                     yield {
                         "error_code": 0,
                         "text": choices[0]["message"]["content"],
